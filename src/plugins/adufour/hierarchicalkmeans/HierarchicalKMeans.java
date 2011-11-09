@@ -3,7 +3,7 @@ package plugins.adufour.hierarchicalkmeans;
 import icy.image.IcyBufferedImage;
 import icy.math.ArrayMath;
 import icy.sequence.Sequence;
-import icy.type.TypeUtil;
+import icy.type.DataType;
 import icy.type.collection.array.ArrayUtil;
 
 import java.util.ArrayList;
@@ -129,8 +129,8 @@ public class HierarchicalKMeans extends EzPlug
 		
 		for (int z = 0; z < seqIN.getSizeZ(); z++)
 		{
-			seqC.setImage(0, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, TypeUtil.TYPE_INT));
-			seqLABELS.setImage(0, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, TypeUtil.TYPE_SHORT));
+			seqC.setImage(0, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.UINT));
+			seqLABELS.setImage(0, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.UINT));
 		}
 		
 		seqOUT.beginUpdate();
@@ -143,13 +143,13 @@ public class HierarchicalKMeans extends EzPlug
 			
 			// 1.1) Copy current image in a new sequence
 			
-			ArrayUtil.arrayToArray(seqIN.getDataXYZ(t, 0), seqLABELS.getDataXYZ(0, 0), seqIN.isSignedDataType());
+			ArrayUtil.arrayToArray(seqIN.getDataXYZ(t, 0), seqLABELS.getDataXYZ(0, 0), seqIN.getDataType_().isSigned());
 			
 			// 1.2) Create the output labeled sequence
 			
 			for (int z = 0; z < seqIN.getSizeZ(); z++)
 			{
-				seqOUT.setImage(t, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, TypeUtil.TYPE_SHORT, false));
+				seqOUT.setImage(t, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.USHORT));
 			}
 			
 			// 2) Pre-filter the input data
