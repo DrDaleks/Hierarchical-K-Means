@@ -8,5 +8,6 @@
 	<classpathentry kind="var" path="ICY_HOME/plugins/adufour/ezplug/EzPlug.jar"/>
 	<classpathentry kind="var" path="ICY_HOME/plugins/fab/trackmanager/TrackManager.jar"/>
 	<classpathentry kind="var" path="ICY_HOME/plugins/adufour/filtering/FilterToolbox.jar"/>
+	<classpathentry kind="var" path="ICY_HOME/plugins/nchenouard/spot/DetectionResult.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
