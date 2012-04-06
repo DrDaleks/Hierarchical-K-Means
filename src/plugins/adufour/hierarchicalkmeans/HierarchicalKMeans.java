@@ -36,6 +36,8 @@ import plugins.nchenouard.spot.DetectionResult;
 
 public class HierarchicalKMeans extends EzPlug
 {
+	private static int resultID = 1;
+	
 	private EzVarSequence	input;
 	
 	private EzVarDouble		preFilterValue;
@@ -186,7 +188,7 @@ public class HierarchicalKMeans extends EzPlug
 		if (seqOUT == null)
 			seqOUT = new Sequence();
 		
-		seqOUT.setName("Hierarchical KMeans segmentation");
+		seqOUT.setName("HK-Means #" + resultID++);
 		
 		Sequence seqLABELS = new Sequence();
 		Sequence seqC = new Sequence();

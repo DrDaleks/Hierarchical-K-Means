@@ -5,9 +5,9 @@
 	<classpathentry kind="var" path="ICY_HOME/icy.jar"/>
 	<classpathentry combineaccessrules="false" kind="src" path="/Connected-Components"/>
 	<classpathentry combineaccessrules="false" kind="src" path="/Thresholder"/>
-	<classpathentry kind="var" path="ICY_HOME/plugins/adufour/ezplug/EzPlug.jar"/>
 	<classpathentry kind="var" path="ICY_HOME/plugins/fab/trackmanager/TrackManager.jar"/>
-	<classpathentry kind="var" path="ICY_HOME/plugins/adufour/filtering/FilterToolbox.jar"/>
 	<classpathentry kind="var" path="ICY_HOME/plugins/nchenouard/spot/DetectionResult.jar"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/EzPlug"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/Filter-Toolbox"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
