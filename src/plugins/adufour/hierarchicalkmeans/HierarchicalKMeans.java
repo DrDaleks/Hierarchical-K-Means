@@ -21,6 +21,7 @@ import javax.vecmath.Point3i;
 import plugins.adufour.connectedcomponents.ConnectedComponent;
 import plugins.adufour.connectedcomponents.ConnectedComponents;
 import plugins.adufour.connectedcomponents.ConnectedComponentsPainter;
+import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzGroup;
 import plugins.adufour.ezplug.EzLabel;
 import plugins.adufour.ezplug.EzPlug;
@@ -29,6 +30,7 @@ import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarInteger;
 import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
+import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
@@ -36,7 +38,7 @@ import plugins.nchenouard.spot.DetectionResult;
 
 public class HierarchicalKMeans extends EzPlug
 {
-	private static int resultID = 1;
+	private static int		resultID	= 1;
 	
 	private EzVarSequence	input;
 	
@@ -78,8 +80,16 @@ public class HierarchicalKMeans extends EzPlug
 	{
 		Sequence labeledSequence = new Sequence();
 		
-		Map<Integer, List<ConnectedComponent>> objects = hierarchicalKMeans(input.getValue(), preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(),
-				labeledSequence);
+		Map<Integer, List<ConnectedComponent>> objects = null;
+		
+		try
+		{
+			objects = hierarchicalKMeans(input.getValue(), preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), labeledSequence);
+		}
+		catch (ConvolutionException e)
+		{
+			throw new EzException(e.getMessage(), true);
+		}
 		
 		// System.out.println("Hierarchical K-Means result:");
 		// System.out.println("T\tobjects");
@@ -118,8 +128,7 @@ public class HierarchicalKMeans extends EzPlug
 			in.beginUpdate();
 			
 			for (ROI2D roi : input.getValue().getROI2Ds())
-				if (roi instanceof ROI2DArea)
-					in.removeROI(roi);
+				if (roi instanceof ROI2DArea) in.removeROI(roi);
 			
 			for (List<ConnectedComponent> ccs : objects.values())
 				for (ConnectedComponent cc : ccs)
@@ -155,8 +164,11 @@ public class HierarchicalKMeans extends EzPlug
 	 *            an empty sequence that will receive the labeled output as unsigned short, or null
 	 *            if not necessary
 	 * @return a map containing the list of connected components found in each time point
+	 * @throws ConvolutionException
+	 *             if the filter size is too large w.r.t. the image size
 	 */
 	public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Sequence seqOUT)
+			throws ConvolutionException
 	{
 		return hierarchicalKMeans(seqIN, preFilter, nbKMeansClasses, minSize, maxSize, null, seqOUT);
 	}
@@ -182,11 +194,13 @@ public class HierarchicalKMeans extends EzPlug
 	 *            an empty sequence that will receive the labeled output as unsigned short, or null
 	 *            if not necessary
 	 * @return a map containing the list of connected components found in each time point
+	 * @throws ConvolutionException
+	 *             if the filter size is too large w.r.t the image size
 	 */
 	public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue, Sequence seqOUT)
+			throws ConvolutionException
 	{
-		if (seqOUT == null)
-			seqOUT = new Sequence();
+		if (seqOUT == null) seqOUT = new Sequence();
 		
 		seqOUT.setName("HK-Means #" + resultID++);
 		
@@ -325,8 +339,10 @@ public class HierarchicalKMeans extends EzPlug
 	 * @param maxSize
 	 *            the maximum size in pixels of the objects to segment
 	 * @return a labeled sequence with all objects extracted in the different classes
+	 * @throws ConvolutionException
+	 *             if the filter size is too large w.r.t. the image size
 	 */
-	public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize)
+	public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize) throws ConvolutionException
 	{
 		return hierarchicalKMeans(seqIN, preFilter, nbKMeansClasses, minSize, maxSize, (Double) null);
 	}
@@ -349,8 +365,10 @@ public class HierarchicalKMeans extends EzPlug
 	 * @param minValue
 	 *            the minimum intensity value each object should have (in any of the input channels)
 	 * @return a labeled sequence with all objects extracted in the different classes
+	 * @throws ConvolutionException
+	 *             if the filter size is too large w.r.t. the image size
 	 */
-	public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue)
+	public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue) throws ConvolutionException
 	{
 		Sequence result = new Sequence();
 		
