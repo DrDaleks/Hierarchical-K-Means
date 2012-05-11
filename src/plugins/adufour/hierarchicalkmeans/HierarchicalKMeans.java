@@ -20,13 +20,14 @@ import javax.vecmath.Point3i;
 
 import plugins.adufour.connectedcomponents.ConnectedComponent;
 import plugins.adufour.connectedcomponents.ConnectedComponents;
-import plugins.adufour.connectedcomponents.ConnectedComponentsPainter;
+import plugins.adufour.connectedcomponents.ConnectedComponents.Sorting;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzGroup;
 import plugins.adufour.ezplug.EzLabel;
 import plugins.adufour.ezplug.EzPlug;
 import plugins.adufour.ezplug.EzVarBoolean;
 import plugins.adufour.ezplug.EzVarDouble;
+import plugins.adufour.ezplug.EzVarEnum;
 import plugins.adufour.ezplug.EzVarInteger;
 import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
@@ -52,6 +53,8 @@ public class HierarchicalKMeans extends EzPlug
 	
 	private EzVarBoolean	exportSequence, exportSwPool, exportROI;
 	
+	private EzVarEnum<Sorting> sorting;
+	
 	private EzLabel			nbObjects;
 	
 	@Override
@@ -67,10 +70,12 @@ public class HierarchicalKMeans extends EzPlug
 		addEzComponent(smartLabelClasses);
 		
 		exportSequence = new EzVarBoolean("Labeled sequence", false);
+		sorting = new EzVarEnum<ConnectedComponents.Sorting>("Sorting", Sorting.values(), Sorting.DEPTH_ASC);
 		exportROI = new EzVarBoolean("ROIs", true);
 		exportSwPool = new EzVarBoolean("Swimming pool data", false);
 		
-		addEzComponent(new EzGroup("Show result as...", exportSequence, exportSwPool, exportROI));
+		addEzComponent(new EzGroup("Show result as...", exportSequence, sorting, exportSwPool, exportROI));
+		exportSequence.addVisibilityTriggerTo(sorting, true);
 		
 		addEzComponent(nbObjects = new EzLabel("< click run to start the detection >"));
 	}
@@ -106,9 +111,8 @@ public class HierarchicalKMeans extends EzPlug
 		
 		if (exportSequence.getValue())
 		{
-			labeledSequence.addPainter(new ConnectedComponentsPainter(objects));
-			
-			labeledSequence.updateComponentsBounds(true, true);
+			ConnectedComponents.createLabeledSequence(labeledSequence, objects, sorting.getValue().comparator);
+			labeledSequence.updateChannelsBounds(true);
 			labeledSequence.getColorModel().setColormap(0, new FireColorMap());
 			
 			addSequence(labeledSequence);
@@ -211,7 +215,7 @@ public class HierarchicalKMeans extends EzPlug
 		for (int z = 0; z < seqIN.getSizeZ(); z++)
 		{
 			seqC.setImage(0, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.UINT));
-			seqLABELS.setImage(0, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.USHORT));
+			seqLABELS.setImage(0, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.UINT));
 		}
 		
 		seqOUT.beginUpdate();
@@ -230,14 +234,17 @@ public class HierarchicalKMeans extends EzPlug
 			
 			for (int z = 0; z < seqIN.getSizeZ(); z++)
 			{
-				seqOUT.setImage(t, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.USHORT));
+				seqOUT.setImage(t, z, new IcyBufferedImage(seqIN.getSizeX(), seqIN.getSizeY(), 1, DataType.UINT));
 			}
 			
 			// 2) Pre-filter the input data
 			
-			Kernels1D gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(preFilter);
+			double scaleXZ = seqIN.getPixelSizeX() / seqIN.getPixelSizeZ();
 			
-			Convolution1D.convolve(seqLABELS, gaussian.getData(), gaussian.getData(), seqIN.getSizeZ() > 1 ? gaussian.getData() : null);
+			Kernels1D gaussianXY = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(preFilter);
+			Kernels1D gaussianZ = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(preFilter * scaleXZ);
+			
+			Convolution1D.convolve(seqLABELS, gaussianXY.getData(), gaussianXY.getData(), seqIN.getSizeZ() > 1 ? gaussianZ.getData() : null);
 			
 			// 3) K-means on the raw data
 			
@@ -250,9 +257,9 @@ public class HierarchicalKMeans extends EzPlug
 				// retrieve classes c and above as a binary image
 				for (int z = 0; z < seqIN.getSizeZ(); z++)
 				{
-					short[] _labels = seqLABELS.getDataXYAsShort(0, z, 0);
+					int[] _labels = seqLABELS.getDataXYAsInt(0, z, 0);
 					int[] _class = seqC.getDataXYAsInt(0, z, 0);
-					short[] _out = seqOUT.getDataXYAsShort(t, z, 0);
+					int[] _out = seqOUT.getDataXYAsInt(t, z, 0);
 					
 					for (int i = 0; i < _labels.length; i++)
 						if ((_labels[i] & 0xffff) >= c && _out[i] == 0)
@@ -301,7 +308,7 @@ public class HierarchicalKMeans extends EzPlug
 				for (int z = 0; z < seqIN.getSizeZ(); z++)
 				{
 					int[] _class = seqC.getDataXYAsInt(0, z, 0);
-					short[] _out = seqOUT.getDataXYAsShort(t, z, 0);
+					int[] _out = seqOUT.getDataXYAsInt(t, z, 0);
 					
 					for (int i = 0; i < _out.length; i++)
 					{
