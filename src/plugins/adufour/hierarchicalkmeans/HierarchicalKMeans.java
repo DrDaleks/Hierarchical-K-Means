@@ -103,7 +103,7 @@ public class HierarchicalKMeans extends EzPlug
 			cpt += objects.get(t).size();
 		// System.out.println("---");
 		
-		nbObjects.setText(cpt + " objects detected");
+		if (getUI() != null) nbObjects.setText(cpt + " objects detected");
 		
 		ArrayList<ConnectedComponent> ccList = new ArrayList<ConnectedComponent>();
 		int nbObjects = 0;
