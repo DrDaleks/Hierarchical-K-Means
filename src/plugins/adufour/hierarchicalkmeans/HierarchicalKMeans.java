@@ -35,44 +35,44 @@ import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
+import plugins.adufour.vars.lang.VarArray;
+import plugins.adufour.vars.lang.VarSequence;
 import plugins.nchenouard.spot.DetectionResult;
 
 public class HierarchicalKMeans extends EzPlug
 {
-	private static int		resultID	= 1;
+	protected static int					resultID			= 1;
 	
-	private EzVarSequence	input;
+	protected EzVarSequence					input				= new EzVarSequence("Input");
 	
-	private EzVarDouble		preFilterValue;
+	protected EzVarDouble					preFilterValue		= new EzVarDouble("Gaussian pre-filter", 0, 50, 0.1);
 	
-	private EzVarInteger	minSize;
+	protected EzVarInteger					minSize				= new EzVarInteger("Min size (px)", 100, 1, 200000000, 1);
 	
-	private EzVarInteger	maxSize;
+	protected EzVarInteger					maxSize				= new EzVarInteger("Max size (px)", 1600, 1, 200000000, 1);
 	
-	private EzVarInteger	smartLabelClasses;
+	protected EzVarInteger					smartLabelClasses	= new EzVarInteger("Number of classes", 10, 2, 255, 1);
 	
-	private EzVarBoolean	exportSequence, exportSwPool, exportROI;
+	protected EzVarBoolean					exportSequence		= new EzVarBoolean("Labeled sequence", false);
+	protected EzVarBoolean					exportSwPool		= new EzVarBoolean("Swimming pool data", false);
+	protected EzVarBoolean					exportROI			= new EzVarBoolean("ROIs", true);
 	
-	private EzVarEnum<Sorting> sorting;
+	protected EzVarEnum<Sorting>			sorting				= new EzVarEnum<ConnectedComponents.Sorting>("Sorting", Sorting.values(), Sorting.DEPTH_ASC);
 	
-	private EzLabel			nbObjects;
+	protected EzLabel						nbObjects;
+	
+	protected VarSequence					outputSequence		= new VarSequence("binary sequence", null);
+	
+	protected VarArray<ConnectedComponent>	outputCCs			= new VarArray<ConnectedComponent>("objects", ConnectedComponent[].class, null);
 	
 	@Override
 	public void initialize()
 	{
-		super.addEzComponent(input = new EzVarSequence("Input"));
-		super.addEzComponent(preFilterValue = new EzVarDouble("Gaussian pre-filter", 0, 50, 0.1));
-		minSize = new EzVarInteger("Min size (px)", 100, 1, 200000000, 1);
-		maxSize = new EzVarInteger("Max size (px)", 1600, 1, 200000000, 1);
+		super.addEzComponent(input);
+		super.addEzComponent(preFilterValue);
 		addEzComponent(new EzGroup("Object size", minSize, maxSize));
 		
-		smartLabelClasses = new EzVarInteger("Number of classes", 10, 2, 255, 1);
 		addEzComponent(smartLabelClasses);
-		
-		exportSequence = new EzVarBoolean("Labeled sequence", false);
-		sorting = new EzVarEnum<ConnectedComponents.Sorting>("Sorting", Sorting.values(), Sorting.DEPTH_ASC);
-		exportROI = new EzVarBoolean("ROIs", true);
-		exportSwPool = new EzVarBoolean("Swimming pool data", false);
 		
 		addEzComponent(new EzGroup("Show result as...", exportSequence, sorting, exportSwPool, exportROI));
 		exportSequence.addVisibilityTriggerTo(sorting, true);
@@ -105,9 +105,16 @@ public class HierarchicalKMeans extends EzPlug
 		
 		nbObjects.setText(cpt + " objects detected");
 		
+		ArrayList<ConnectedComponent> ccList = new ArrayList<ConnectedComponent>();
 		int nbObjects = 0;
 		for (List<ConnectedComponent> ccs : objects.values())
+		{
 			nbObjects += ccs.size();
+			ccList.ensureCapacity(nbObjects);
+			ccList.addAll(ccs);
+		}
+		outputSequence.setValue(labeledSequence);
+		outputCCs.setValue(ccList.toArray(new ConnectedComponent[nbObjects]));
 		
 		if (exportSequence.getValue())
 		{
