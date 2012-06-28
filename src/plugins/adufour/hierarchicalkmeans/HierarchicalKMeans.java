@@ -37,35 +37,35 @@ import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
-import plugins.adufour.vars.lang.VarArray;
+import plugins.adufour.vars.lang.VarGenericArray;
 import plugins.adufour.vars.lang.VarSequence;
 import plugins.nchenouard.spot.DetectionResult;
 
 public class HierarchicalKMeans extends EzPlug implements Block
 {
-    protected static int                   resultID          = 1;
+    protected static int                            resultID          = 1;
     
-    protected EzVarSequence                input             = new EzVarSequence("Input");
+    protected EzVarSequence                         input             = new EzVarSequence("Input");
     
-    protected EzVarDouble                  preFilterValue    = new EzVarDouble("Gaussian pre-filter", 0, 50, 0.1);
+    protected EzVarDouble                           preFilterValue    = new EzVarDouble("Gaussian pre-filter", 0, 50, 0.1);
     
-    protected EzVarInteger                 minSize           = new EzVarInteger("Min size (px)", 100, 1, 200000000, 1);
+    protected EzVarInteger                          minSize           = new EzVarInteger("Min size (px)", 100, 1, 200000000, 1);
     
-    protected EzVarInteger                 maxSize           = new EzVarInteger("Max size (px)", 1600, 1, 200000000, 1);
+    protected EzVarInteger                          maxSize           = new EzVarInteger("Max size (px)", 1600, 1, 200000000, 1);
     
-    protected EzVarInteger                 smartLabelClasses = new EzVarInteger("Number of classes", 10, 2, 255, 1);
+    protected EzVarInteger                          smartLabelClasses = new EzVarInteger("Number of classes", 10, 2, 255, 1);
     
-    protected EzVarBoolean                 exportSequence    = new EzVarBoolean("Labeled sequence", false);
-    protected EzVarBoolean                 exportSwPool      = new EzVarBoolean("Swimming pool data", false);
-    protected EzVarBoolean                 exportROI         = new EzVarBoolean("ROIs", true);
+    protected EzVarBoolean                          exportSequence    = new EzVarBoolean("Labeled sequence", false);
+    protected EzVarBoolean                          exportSwPool      = new EzVarBoolean("Swimming pool data", false);
+    protected EzVarBoolean                          exportROI         = new EzVarBoolean("ROIs", true);
     
-    protected EzVarEnum<Sorting>           sorting           = new EzVarEnum<ConnectedComponents.Sorting>("Sorting", Sorting.values(), Sorting.DEPTH_ASC);
+    protected EzVarEnum<Sorting>                    sorting           = new EzVarEnum<ConnectedComponents.Sorting>("Sorting", Sorting.values(), Sorting.DEPTH_ASC);
     
-    protected EzLabel                      nbObjects;
+    protected EzLabel                               nbObjects;
     
-    protected VarSequence                  outputSequence    = new VarSequence("binary sequence", null);
+    protected VarSequence                           outputSequence    = new VarSequence("binary sequence", null);
     
-    protected VarArray<ConnectedComponent> outputCCs         = new VarArray<ConnectedComponent>("objects", ConnectedComponent[].class, null);
+    protected VarGenericArray<ConnectedComponent[]> outputCCs         = new VarGenericArray<ConnectedComponent[]>("objects", ConnectedComponent[].class, null);
     
     @Override
     public void initialize()
@@ -91,7 +91,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
         
         try
         {
-            objects = hierarchicalKMeans(input.getValue(), preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), labeledSequence);
+            objects = hierarchicalKMeans(input.getValue(true), preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), labeledSequence);
         }
         catch (ConvolutionException e)
         {
