@@ -1,5 +1,6 @@
 package plugins.adufour.hierarchicalkmeans;
 
+import icy.file.FileUtil;
 import icy.image.IcyBufferedImage;
 import icy.image.colormap.FireColorMap;
 import icy.main.Icy;
@@ -39,6 +40,7 @@ import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
 import plugins.adufour.vars.lang.VarGenericArray;
 import plugins.adufour.vars.lang.VarSequence;
+import plugins.adufour.vars.util.VarException;
 import plugins.nchenouard.spot.DetectionResult;
 
 public class HierarchicalKMeans extends EzPlug implements Block
@@ -89,6 +91,9 @@ public class HierarchicalKMeans extends EzPlug implements Block
         
         Map<Integer, List<ConnectedComponent>> objects = null;
         
+        int nbKMeansClasses = smartLabelClasses.getValue();
+        if (nbKMeansClasses < 2) throw new VarException("HK-Means requires at least two classes to run");
+        
         try
         {
             objects = hierarchicalKMeans(input.getValue(true), preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), labeledSequence);
@@ -97,6 +102,8 @@ public class HierarchicalKMeans extends EzPlug implements Block
         {
             throw new EzException(e.getMessage(), true);
         }
+        
+        labeledSequence.setName(FileUtil.getFileName(input.getValue().getName(), false) + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
         
         // System.out.println("Hierarchical K-Means result:");
         // System.out.println("T\tobjects");
@@ -115,6 +122,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
             ccList.ensureCapacity(nbObjects);
             ccList.addAll(ccs);
         }
+        
         outputSequence.setValue(labeledSequence);
         outputCCs.setValue(ccList.toArray(new ConnectedComponent[nbObjects]));
         
@@ -214,8 +222,6 @@ public class HierarchicalKMeans extends EzPlug implements Block
             throws ConvolutionException
     {
         if (seqOUT == null) seqOUT = new Sequence();
-        
-        seqOUT.setName("HK-Means #" + resultID++);
         
         Sequence seqLABELS = new Sequence();
         Sequence seqC = new Sequence();
