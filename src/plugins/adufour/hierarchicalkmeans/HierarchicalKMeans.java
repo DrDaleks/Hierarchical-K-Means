@@ -1,6 +1,5 @@
 package plugins.adufour.hierarchicalkmeans;
 
-import icy.file.FileUtil;
 import icy.image.IcyBufferedImage;
 import icy.image.colormap.FireColorMap;
 import icy.main.Icy;
@@ -103,7 +102,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
             throw new EzException(e.getMessage(), true);
         }
         
-        labeledSequence.setName(FileUtil.getFileName(input.getValue().getName(), false) + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
+        labeledSequence.setName(input.getValue().getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
         
         // System.out.println("Hierarchical K-Means result:");
         // System.out.println("T\tobjects");
