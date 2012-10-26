@@ -183,7 +183,6 @@ public class HKMeans
                     }
                 } // currentClass
             }
-            System.out.println("processed frame " + t);
             System.gc();
         }
         
