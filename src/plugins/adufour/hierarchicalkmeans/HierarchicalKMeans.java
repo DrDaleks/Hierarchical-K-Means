@@ -4,6 +4,7 @@ import icy.image.IcyBufferedImage;
 import icy.image.colormap.FireColorMap;
 import icy.image.colormodel.IcyColorModel;
 import icy.main.Icy;
+import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.roi.ROI2DArea;
 import icy.sequence.DimensionId;
@@ -41,6 +42,7 @@ import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
 import plugins.adufour.vars.lang.VarGenericArray;
+import plugins.adufour.vars.lang.VarROIArray;
 import plugins.adufour.vars.lang.VarSequence;
 import plugins.adufour.vars.util.VarException;
 import plugins.nchenouard.spot.DetectionResult;
@@ -74,6 +76,8 @@ public class HierarchicalKMeans extends EzPlug implements Block
     protected VarSequence                           outputSequence    = new VarSequence("binary sequence", null);
     
     protected VarGenericArray<ConnectedComponent[]> outputCCs         = new VarGenericArray<ConnectedComponent[]>("objects", ConnectedComponent[].class, null);
+    
+    protected VarROIArray                           outputROIs        = new VarROIArray("list of ROI");
     
     @Override
     public void initialize()
@@ -164,15 +168,11 @@ public class HierarchicalKMeans extends EzPlug implements Block
             Icy.getMainInterface().getSwimmingPool().add(object);
         }
         
-        if (exportROI.getValue() && labeledSequence.getSizeZ() == 1)
+        if (exportROI.getValue() || outputROIs.isReferenced())
         {
-            Sequence in = input.getValue();
+            if (labeledSequence.getSizeZ() > 1) throw new RuntimeException("ROI export is not supported in 3D yet.");
             
-            in.beginUpdate();
-            
-            for (ROI2D roi : input.getValue().getROI2Ds())
-                if (roi instanceof ROI2DArea) in.removeROI(roi);
-            
+            ArrayList<ROI2DArea> rois = new ArrayList<ROI2DArea>(objects.size());
             for (List<ConnectedComponent> ccs : objects.values())
                 for (ConnectedComponent cc : ccs)
                 {
@@ -180,10 +180,24 @@ public class HierarchicalKMeans extends EzPlug implements Block
                     for (Point3i pt : cc)
                         area.addPoint(pt.x, pt.y);
                     area.setT(cc.getT());
-                    in.addROI(area);
+                    rois.add(area);
                 }
+            outputROIs.setValue(rois.toArray(new ROI2DArea[rois.size()]));
             
-            in.endUpdate();
+            if (exportROI.getValue())
+            {
+                Sequence in = input.getValue();
+                
+                in.beginUpdate();
+                
+                for (ROI2D roi : input.getValue().getROI2Ds())
+                    if (roi instanceof ROI2DArea) in.removeROI(roi);
+                
+                for (ROI roi : outputROIs.getValue())
+                    in.addROI(roi);
+                
+                in.endUpdate();
+            }
         }
         
         setTimeDisplay(true);
@@ -468,7 +482,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
         seqOUT.dataChanged();
         return componentsMap;
     }
-        
+    
     public void clean()
     {
     }
@@ -493,6 +507,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
     {
         outputMap.add("binary sequence", outputSequence);
         outputMap.add("output objects", outputCCs);
+        outputMap.add("output regions", outputROIs);
     }
     
 }
