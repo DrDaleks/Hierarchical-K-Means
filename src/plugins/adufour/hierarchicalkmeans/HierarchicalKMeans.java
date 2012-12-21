@@ -10,6 +10,7 @@ import icy.roi.ROI2DArea;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
 import icy.swimmingPool.SwimmingObject;
+import icy.system.IcyHandledException;
 import icy.type.DataType;
 import icy.type.collection.array.ArrayUtil;
 
@@ -170,9 +171,11 @@ public class HierarchicalKMeans extends EzPlug implements Block
         
         if (exportROI.getValue() || outputROIs.isReferenced())
         {
-            if (labeledSequence.getSizeZ() > 1) throw new RuntimeException("ROI export is not supported in 3D yet.");
+            if (labeledSequence.getSizeZ() > 1) throw new IcyHandledException("ROI export is not supported in 3D yet.");
             
             ArrayList<ROI2DArea> rois = new ArrayList<ROI2DArea>(objects.size());
+            
+            cpt = 1;
             for (List<ConnectedComponent> ccs : objects.values())
                 for (ConnectedComponent cc : ccs)
                 {
@@ -180,6 +183,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
                     for (Point3i pt : cc)
                         area.addPoint(pt.x, pt.y);
                     area.setT(cc.getT());
+                    area.setName("HK-Means detection #" + cpt++);
                     rois.add(area);
                 }
             outputROIs.setValue(rois.toArray(new ROI2DArea[rois.size()]));
@@ -198,9 +202,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
                 
                 in.endUpdate();
             }
-        }
-        
-        setTimeDisplay(true);
+        }        
     }
     
     /**
@@ -474,7 +476,6 @@ public class HierarchicalKMeans extends EzPlug implements Block
                     }
                 } // currentClass
             }
-            System.out.println("processed frame " + t);
             System.gc();
         }
         
