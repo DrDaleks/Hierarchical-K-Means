@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding="MacRoman" standalone="no"?>
+<?xml version="1.0" encoding="US-ASCII" standalone="no"?>
 <jardesc>
-    <jar path="Hierarchical-K-Means/HierarchicalKmeans.jar"/>
-    <options buildIfNeeded="true" compress="true" descriptionLocation="/Hierarchical-K-Means/hierarchicalkmeans.jardesc" exportErrors="true" exportWarnings="true" includeDirectoryEntries="false" overwrite="true" saveDescription="true" storeRefactorings="false" useSourceFolders="false"/>
+    <jar path="HK-Means/HierarchicalKmeans.jar"/>
+    <options buildIfNeeded="true" compress="true" descriptionLocation="/HK-Means/hierarchicalkmeans.jardesc" exportErrors="true" exportWarnings="true" includeDirectoryEntries="false" overwrite="true" saveDescription="true" storeRefactorings="false" useSourceFolders="false"/>
     <storedRefactorings deprecationInfo="true" structuralOnly="false"/>
     <selectedProjects/>
     <manifest generateManifest="true" manifestLocation="" manifestVersion="1.0" reuseManifest="false" saveManifest="false" usesManifest="true">
@@ -11,6 +11,6 @@
         </sealing>
     </manifest>
     <selectedElements exportClassFiles="true" exportJavaFiles="true" exportOutputFolder="false">
-        <javaElement handleIdentifier="=Hierarchical-K-Means/src"/>
+        <javaElement handleIdentifier="=HK-Means/src"/>
     </selectedElements>
 </jardesc>

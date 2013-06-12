@@ -10,7 +10,6 @@ import icy.roi.ROI2DArea;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
 import icy.swimmingPool.SwimmingObject;
-import icy.system.IcyHandledException;
 import icy.type.DataType;
 import icy.type.collection.array.ArrayUtil;
 
@@ -40,6 +39,7 @@ import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
+import plugins.adufour.roi.ROI3DArea;
 import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
 import plugins.adufour.vars.lang.VarGenericArray;
@@ -157,7 +157,8 @@ public class HierarchicalKMeans extends EzPlug implements Block
                 for (int c = 0; c < input.getValue().getSizeC(); c++)
                     cmOUT.setColormap(c, cmIN.getColormap(c));
             }
-            else labeledSequence.getColorModel().setColormap(0, new FireColorMap());
+            else
+                labeledSequence.getColorModel().setColormap(0, new FireColorMap());
             
             addSequence(labeledSequence);
         }
@@ -171,22 +172,35 @@ public class HierarchicalKMeans extends EzPlug implements Block
         
         if (exportROI.getValue() || outputROIs.isReferenced())
         {
-            if (labeledSequence.getSizeZ() > 1) throw new IcyHandledException("ROI export is not supported in 3D yet.");
+            ArrayList<ROI> rois = new ArrayList<ROI>(objects.size());
             
-            ArrayList<ROI2DArea> rois = new ArrayList<ROI2DArea>(objects.size());
+            boolean is3D = labeledSequence.getSizeZ() > 1;
             
             cpt = 1;
             for (List<ConnectedComponent> ccs : objects.values())
                 for (ConnectedComponent cc : ccs)
                 {
-                    ROI2DArea area = new ROI2DArea();
-                    for (Point3i pt : cc)
-                        area.addPoint(pt.x, pt.y);
-                    area.setT(cc.getT());
-                    area.setName("HK-Means detection #" + cpt++);
-                    rois.add(area);
+                    ROI roi;
+                    if (is3D)
+                    {
+                        ROI3DArea area = new ROI3DArea();
+                        for (Point3i pt : cc)
+                            area.addPoint(pt.x, pt.y, pt.z);
+                        area.setT(cc.getT());
+                        roi = area;
+                    }
+                    else
+                    {
+                        ROI2DArea area = new ROI2DArea();
+                        for (Point3i pt : cc)
+                            area.addPoint(pt.x, pt.y);
+                        area.setT(cc.getT());
+                        roi = area;
+                    }
+                    roi.setName("HK-Means detection #" + cpt++);
+                    rois.add(roi);
                 }
-            outputROIs.setValue(rois.toArray(new ROI2DArea[rois.size()]));
+            outputROIs.setValue(rois.toArray(new ROI[rois.size()]));
             
             if (exportROI.getValue())
             {
@@ -202,7 +216,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
                 
                 in.endUpdate();
             }
-        }        
+        }
     }
     
     /**
@@ -257,8 +271,8 @@ public class HierarchicalKMeans extends EzPlug implements Block
      * @throws ConvolutionException
      *             if the filter size is too large w.r.t the image size
      */
-    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue, Sequence seqOUT)
-            throws ConvolutionException
+    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue,
+            Sequence seqOUT) throws ConvolutionException
     {
         return hierarchicalKMeans(seqIN, -1, preFilter, nbKMeansClasses, minSize, maxSize, minValue, seqOUT);
     }
@@ -343,8 +357,8 @@ public class HierarchicalKMeans extends EzPlug implements Block
      * @throws ConvolutionException
      *             if the filter size is too large w.r.t the image size
      */
-    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, int channel, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue,
-            Sequence seqOUT) throws ConvolutionException
+    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, int channel, double preFilter, int nbKMeansClasses, int minSize, int maxSize,
+            Double minValue, Sequence seqOUT) throws ConvolutionException
     {
         if (seqOUT == null) seqOUT = new Sequence();
         
