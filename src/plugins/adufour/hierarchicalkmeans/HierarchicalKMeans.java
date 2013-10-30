@@ -6,7 +6,6 @@ import icy.image.colormodel.IcyColorModel;
 import icy.main.Icy;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
-import icy.roi.ROI2DArea;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
 import icy.swimmingPool.SwimmingObject;
@@ -39,13 +38,14 @@ import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
-import plugins.adufour.roi.ROI3DArea;
 import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
 import plugins.adufour.vars.lang.VarGenericArray;
 import plugins.adufour.vars.lang.VarROIArray;
 import plugins.adufour.vars.lang.VarSequence;
 import plugins.adufour.vars.util.VarException;
+import plugins.kernel.roi.roi2d.ROI2DArea;
+import plugins.kernel.roi.roi3d.ROI3DArea;
 import plugins.nchenouard.spot.DetectionResult;
 
 public class HierarchicalKMeans extends EzPlug implements Block
@@ -155,10 +155,9 @@ public class HierarchicalKMeans extends EzPlug implements Block
             if (channel.getValue() == -1)
             {
                 for (int c = 0; c < input.getValue().getSizeC(); c++)
-                    cmOUT.setColormap(c, cmIN.getColormap(c));
+                    cmOUT.setColorMap(c, cmIN.getColorMap(c), true);
             }
-            else
-                labeledSequence.getColorModel().setColormap(0, new FireColorMap());
+            else labeledSequence.getColorModel().setColorMap(0, new FireColorMap(), true);
             
             addSequence(labeledSequence);
         }
@@ -186,6 +185,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
                         ROI3DArea area = new ROI3DArea();
                         for (Point3i pt : cc)
                             area.addPoint(pt.x, pt.y, pt.z);
+                        
                         area.setT(cc.getT());
                         roi = area;
                     }
@@ -271,8 +271,8 @@ public class HierarchicalKMeans extends EzPlug implements Block
      * @throws ConvolutionException
      *             if the filter size is too large w.r.t the image size
      */
-    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue,
-            Sequence seqOUT) throws ConvolutionException
+    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue, Sequence seqOUT)
+            throws ConvolutionException
     {
         return hierarchicalKMeans(seqIN, -1, preFilter, nbKMeansClasses, minSize, maxSize, minValue, seqOUT);
     }
@@ -357,8 +357,8 @@ public class HierarchicalKMeans extends EzPlug implements Block
      * @throws ConvolutionException
      *             if the filter size is too large w.r.t the image size
      */
-    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, int channel, double preFilter, int nbKMeansClasses, int minSize, int maxSize,
-            Double minValue, Sequence seqOUT) throws ConvolutionException
+    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, int channel, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue,
+            Sequence seqOUT) throws ConvolutionException
     {
         if (seqOUT == null) seqOUT = new Sequence();
         
@@ -510,6 +510,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
         inputMap.add("Min size (px)", minSize.getVariable());
         inputMap.add("Max size (px)", maxSize.getVariable());
         inputMap.add("Number of classes", smartLabelClasses.getVariable());
+        inputMap.add("Final threshold", finalThreshold.getVariable());
         
         // force sequence export in box mode
         exportROI.setValue(false);
