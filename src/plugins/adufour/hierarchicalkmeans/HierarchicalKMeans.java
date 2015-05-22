@@ -1,6 +1,5 @@
 package plugins.adufour.hierarchicalkmeans;
 
-import icy.image.IcyBufferedImage;
 import icy.image.colormap.FireColorMap;
 import icy.image.colormodel.IcyColorModel;
 import icy.main.Icy;
@@ -8,12 +7,13 @@ import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
+import icy.sequence.SequenceUtil;
 import icy.swimmingPool.SwimmingObject;
-import icy.type.DataType;
-import icy.type.collection.array.ArrayUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,17 +29,14 @@ import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzGroup;
 import plugins.adufour.ezplug.EzLabel;
 import plugins.adufour.ezplug.EzPlug;
+import plugins.adufour.ezplug.EzStoppable;
 import plugins.adufour.ezplug.EzVarBoolean;
 import plugins.adufour.ezplug.EzVarDimensionPicker;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarEnum;
 import plugins.adufour.ezplug.EzVarInteger;
 import plugins.adufour.ezplug.EzVarSequence;
-import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.ConvolutionException;
-import plugins.adufour.filtering.Kernels1D;
-import plugins.adufour.thresholder.KMeans;
-import plugins.adufour.thresholder.Thresholder;
 import plugins.adufour.vars.lang.VarGenericArray;
 import plugins.adufour.vars.lang.VarROIArray;
 import plugins.adufour.vars.lang.VarSequence;
@@ -47,8 +44,10 @@ import plugins.adufour.vars.util.VarException;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi3d.ROI3DArea;
 import plugins.nchenouard.spot.DetectionResult;
+import plugins.nchenouard.spot.Point3D;
+import plugins.nchenouard.spot.Spot;
 
-public class HierarchicalKMeans extends EzPlug implements Block
+public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
 {
     protected static int                            resultID          = 1;
     
@@ -101,106 +100,103 @@ public class HierarchicalKMeans extends EzPlug implements Block
     @Override
     public void execute()
     {
-        Sequence labeledSequence = new Sequence();
-        
-        Map<Integer, List<ConnectedComponent>> objects = null;
+        Sequence labeledSequence = exportSequence.getValue() ? new Sequence() : null;
         
         int nbKMeansClasses = smartLabelClasses.getValue();
-        if (nbKMeansClasses < 2) throw new VarException("HK-Means requires at least two classes to run");
+        if (nbKMeansClasses < 2) throw new VarException(smartLabelClasses.getVariable(), "HK-Means requires at least two classes to run");
+        
+        List<ConnectedComponent> ccs = null;
         
         try
         {
-            objects = hierarchicalKMeans(input.getValue(true), channel.getValue(), preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(),
-                    finalThreshold.getValue(), labeledSequence);
+            Sequence s = SequenceUtil.extractChannel(input.getValue(true), channel.getValue());
+            
+            ccs = HKMeans.hKMeans(s, preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), finalThreshold.getValue(), labeledSequence);
         }
         catch (ConvolutionException e)
         {
-            throw new EzException(e.getMessage(), true);
+            throw new EzException(this, e.getMessage(), true);
         }
         
-        labeledSequence.setName(input.getValue().getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
+        if (getUI() != null) nbObjects.setText(ccs.size() + " objects detected");
         
-        // System.out.println("Hierarchical K-Means result:");
-        // System.out.println("T\tobjects");
-        int cpt = 0;
-        if (objects != null)
-        {
-            for (Integer t : objects.keySet())
-                cpt += objects.get(t).size();
-        }
-        // System.out.println("---");
-        
-        if (getUI() != null) nbObjects.setText(cpt + " objects detected");
-        
-        ArrayList<ConnectedComponent> ccList = new ArrayList<ConnectedComponent>();
-        int nbObjects = 0;
-        for (List<ConnectedComponent> ccs : objects.values())
-        {
-            nbObjects += ccs.size();
-            ccList.ensureCapacity(nbObjects);
-            ccList.addAll(ccs);
-        }
-        
+        if (exportSequence.getValue()) labeledSequence.setName(input.getValue(true).getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
         outputSequence.setValue(labeledSequence);
-        outputCCs.setValue(ccList.toArray(new ConnectedComponent[nbObjects]));
+        
+        outputCCs.setValue(ccs.toArray(new ConnectedComponent[ccs.size()]));
         
         if (exportSequence.getValue())
         {
-            ConnectedComponents.createLabeledSequence(labeledSequence, objects, sorting.getValue().comparator);
-            labeledSequence.updateChannelsBounds(true);
+            if (sorting.getValue().comparator != null) reLabel(labeledSequence, ccs, sorting.getValue().comparator);
             
+            labeledSequence.updateChannelsBounds(true);
             IcyColorModel cmIN = input.getValue().getColorModel();
             IcyColorModel cmOUT = labeledSequence.getColorModel();
             
             if (channel.getValue() == -1)
             {
+                // Use same color maps as the original sequence
                 for (int c = 0; c < input.getValue().getSizeC(); c++)
                     cmOUT.setColorMap(c, cmIN.getColorMap(c), true);
             }
-            else labeledSequence.getColorModel().setColorMap(0, new FireColorMap(), true);
+            else
+            {
+                // Use a "fire" color map
+                labeledSequence.getColorModel().setColorMap(0, new FireColorMap(), true);
+            }
             
             addSequence(labeledSequence);
         }
         
         if (exportSwPool.getValue())
         {
-            DetectionResult result = ConnectedComponents.convertToDetectionResult(objects, input.getValue());
-            SwimmingObject object = new SwimmingObject(result, "Set of " + nbObjects + " connected components");
+            // Convert the list of ROI to a detection set
+            DetectionResult result = new DetectionResult();
+            for (ConnectedComponent cc : ccs)
+            {
+                Spot trackableSpot = new Spot(cc.getX(), cc.getY(), cc.getZ());
+                for(Point3i pt : cc)
+                {
+                    trackableSpot.point3DList.add(new Point3D(pt.x, pt.y, pt.z));
+                }
+                result.addDetection(cc.getT(), trackableSpot);
+            }
+            SwimmingObject object = new SwimmingObject(result, "HK-Means: " + result.getNumberOfDetection() + " objects");
             Icy.getMainInterface().getSwimmingPool().add(object);
         }
         
         if (exportROI.getValue() || outputROIs.isReferenced())
         {
-            ArrayList<ROI> rois = new ArrayList<ROI>(objects.size());
+            ROI[] rois = new ROI[ccs.size()];
             
-            boolean is3D = labeledSequence.getSizeZ() > 1;
+            boolean is3D = input.getValue(true).getSizeZ() > 1;
             
-            cpt = 1;
-            for (List<ConnectedComponent> ccs : objects.values())
-                for (ConnectedComponent cc : ccs)
+            int cpt = 0;
+            for (ConnectedComponent cc : ccs)
+            {
+                ROI roi;
+                if (is3D)
                 {
-                    ROI roi;
-                    if (is3D)
-                    {
-                        ROI3DArea area = new ROI3DArea();
-                        for (Point3i pt : cc)
-                            area.addPoint(pt.x, pt.y, pt.z);
-                        
-                        area.setT(cc.getT());
-                        roi = area;
-                    }
-                    else
-                    {
-                        ROI2DArea area = new ROI2DArea();
-                        for (Point3i pt : cc)
-                            area.addPoint(pt.x, pt.y);
-                        area.setT(cc.getT());
-                        roi = area;
-                    }
-                    roi.setName("HK-Means detection #" + cpt++);
-                    rois.add(roi);
+                    ROI3DArea area = new ROI3DArea();
+                    for (Point3i pt : cc)
+                        area.addPoint(pt.x, pt.y, pt.z);
+                    
+                    area.setT(cc.getT());
+                    roi = area;
                 }
-            outputROIs.setValue(rois.toArray(new ROI[rois.size()]));
+                else
+                {
+                    ROI2DArea area = new ROI2DArea();
+                    for (Point3i pt : cc)
+                        area.addPoint(pt.x, pt.y);
+                    area.setT(cc.getT());
+                    roi = area;
+                }
+                
+                rois[cpt++] = roi;
+                roi.setName("HK-Means detection #" + cpt);
+            }
+            outputROIs.setValue(rois);
             
             if (exportROI.getValue())
             {
@@ -219,10 +215,96 @@ public class HierarchicalKMeans extends EzPlug implements Block
         }
     }
     
+    private void reLabel(Sequence labeledSequence, List<ConnectedComponent> ccs, Comparator<ConnectedComponent> comparator)
+    {
+        if (comparator == null) return;
+        
+        int width = labeledSequence.getSizeX();
+        
+        // one incremental IDs for each channel
+        int[] ids = new int[labeledSequence.getSizeC()];
+        Arrays.fill(ids, 1);
+        
+        Collections.sort(ccs, comparator);
+        
+        for (ConnectedComponent cc : ccs)
+        {
+            int[][] z_xy = labeledSequence.getDataXYZAsInt(cc.getT(), cc.getC());
+            int value = ids[cc.getC()];
+            
+            for (Point3i pt : cc)
+            {
+                z_xy[pt.z][pt.y * width + pt.x] = value;
+            }
+            
+            // increment the ID for that channel
+            ids[cc.getC()]++;
+        }
+    }
+    
+    /**
+     * Performs a hierarchical K-Means segmentation on the input sequence, and returns the result as
+     * a labeled sequence
+     * 
+     * @deprecated Use {@link HKMeans#hKMeans(Sequence, double, int, int, int, Double, Sequence)}
+     *             instead.
+     * @param seqIN
+     *            the sequence to segment
+     * @param preFilter
+     *            the standard deviation of the Gaussian filter to apply before segmentation (0 for
+     *            none)
+     * @param nbKMeansClasses
+     *            the number of classes to divide the histogram
+     * @param minSize
+     *            the minimum size in pixels of the objects to segment
+     * @param maxSize
+     *            the maximum size in pixels of the objects to segment
+     * @return a labeled sequence with all objects extracted in the different classes
+     * @throws ConvolutionException
+     *             if the filter size is too large w.r.t. the image size
+     */
+    public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize) throws ConvolutionException
+    {
+        return hierarchicalKMeans(seqIN, preFilter, nbKMeansClasses, minSize, maxSize, (Double) null);
+    }
+    
+    /**
+     * Performs a hierarchical K-Means segmentation on the input sequence, and returns the result as
+     * a labeled sequence
+     * 
+     * @deprecated Use {@link HKMeans#hKMeans(Sequence, double, int, int, int, Double, Sequence)}
+     *             instead.
+     * @param seqIN
+     *            the sequence to segment
+     * @param preFilter
+     *            the standard deviation of the Gaussian filter to apply before segmentation (0 for
+     *            none)
+     * @param nbKMeansClasses
+     *            the number of classes to divide the histogram
+     * @param minSize
+     *            the minimum size in pixels of the objects to segment
+     * @param maxSize
+     *            the maximum size in pixels of the objects to segment
+     * @param minValue
+     *            the minimum intensity value each object should have (in any of the input channels)
+     * @return a labeled sequence with all objects extracted in the different classes
+     * @throws ConvolutionException
+     *             if the filter size is too large w.r.t. the image size
+     */
+    public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue) throws ConvolutionException
+    {
+        Sequence result = new Sequence();
+        
+        HKMeans.hKMeans(seqIN, preFilter, nbKMeansClasses, minSize, maxSize, minValue, result);
+        
+        return result;
+    }
+    
     /**
      * Performs a hierarchical K-Means segmentation on the input sequence, and returns all the
      * detected objects
      * 
+     * @deprecated Use {@link HKMeans#hKMeans(Sequence, byte, int, int, Double)} instead.
      * @param seqIN
      *            the sequence to segment
      * @param preFilter
@@ -251,6 +333,7 @@ public class HierarchicalKMeans extends EzPlug implements Block
      * Performs a hierarchical K-Means segmentation on the input sequence, and returns all the
      * detected objects
      * 
+     * @deprecated Use {@link HKMeans#hKMeans(Sequence, byte, int, int, Double)} instead.
      * @param seqIN
      *            the sequence to segment
      * @param preFilter
@@ -271,70 +354,17 @@ public class HierarchicalKMeans extends EzPlug implements Block
      * @throws ConvolutionException
      *             if the filter size is too large w.r.t the image size
      */
-    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue, Sequence seqOUT)
-            throws ConvolutionException
+    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue,
+            Sequence seqOUT) throws ConvolutionException
     {
         return hierarchicalKMeans(seqIN, -1, preFilter, nbKMeansClasses, minSize, maxSize, minValue, seqOUT);
-    }
-    
-    /**
-     * Performs a hierarchical K-Means segmentation on the input sequence, and returns the result as
-     * a labeled sequence
-     * 
-     * @param seqIN
-     *            the sequence to segment
-     * @param preFilter
-     *            the standard deviation of the Gaussian filter to apply before segmentation (0 for
-     *            none)
-     * @param nbKMeansClasses
-     *            the number of classes to divide the histogram
-     * @param minSize
-     *            the minimum size in pixels of the objects to segment
-     * @param maxSize
-     *            the maximum size in pixels of the objects to segment
-     * @return a labeled sequence with all objects extracted in the different classes
-     * @throws ConvolutionException
-     *             if the filter size is too large w.r.t. the image size
-     */
-    public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize) throws ConvolutionException
-    {
-        return hierarchicalKMeans(seqIN, preFilter, nbKMeansClasses, minSize, maxSize, (Double) null);
-    }
-    
-    /**
-     * Performs a hierarchical K-Means segmentation on the input sequence, and returns the result as
-     * a labeled sequence
-     * 
-     * @param seqIN
-     *            the sequence to segment
-     * @param preFilter
-     *            the standard deviation of the Gaussian filter to apply before segmentation (0 for
-     *            none)
-     * @param nbKMeansClasses
-     *            the number of classes to divide the histogram
-     * @param minSize
-     *            the minimum size in pixels of the objects to segment
-     * @param maxSize
-     *            the maximum size in pixels of the objects to segment
-     * @param minValue
-     *            the minimum intensity value each object should have (in any of the input channels)
-     * @return a labeled sequence with all objects extracted in the different classes
-     * @throws ConvolutionException
-     *             if the filter size is too large w.r.t. the image size
-     */
-    public static Sequence hierarchicalKMeans(Sequence seqIN, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue) throws ConvolutionException
-    {
-        Sequence result = new Sequence();
-        
-        hierarchicalKMeans(seqIN, preFilter, nbKMeansClasses, minSize, maxSize, minValue, result);
-        
-        return result;
     }
     
     /**
      * Performs a hierarchical K-Means segmentation on the input sequence, and returns all the
      * detected objects
      * 
+     * @deprecated Use {@link HKMeans#hKMeans(Sequence, byte, int, int, Double)} instead.
      * @param seqIN
      *            the sequence to segment
      * @param channel
@@ -357,145 +387,32 @@ public class HierarchicalKMeans extends EzPlug implements Block
      * @throws ConvolutionException
      *             if the filter size is too large w.r.t the image size
      */
-    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, int channel, double preFilter, int nbKMeansClasses, int minSize, int maxSize, Double minValue,
-            Sequence seqOUT) throws ConvolutionException
+    public static Map<Integer, List<ConnectedComponent>> hierarchicalKMeans(Sequence seqIN, int channel, double preFilter, int nbKMeansClasses, int minSize, int maxSize,
+            Double minValue, Sequence seqOUT) throws ConvolutionException
     {
-        if (seqOUT == null) seqOUT = new Sequence();
+        Map<Integer, List<ConnectedComponent>> map = new HashMap<Integer, List<ConnectedComponent>>();
         
-        final int width = seqIN.getSizeX();
-        final int height = seqIN.getSizeY();
-        final int depth = seqIN.getSizeZ();
-        final int frames = seqIN.getSizeT();
-        final int channels = seqIN.getSizeC();
-        
-        Sequence seqLABELS = new Sequence();
-        Sequence seqC = new Sequence();
-        seqC.setName("Current class");
-        
-        for (int z = 0; z < depth; z++)
+        if (seqIN.getSizeC() > 1 && channel != -1)
         {
-            seqC.setImage(0, z, new IcyBufferedImage(width, height, 1, DataType.UINT));
-            seqLABELS.setImage(0, z, new IcyBufferedImage(width, height, 1, DataType.UINT));
+            // extract channel
+            seqIN = SequenceUtil.extractChannel(seqIN, channel);
         }
         
-        seqOUT.beginUpdate();
+        List<ConnectedComponent> components = HKMeans.hKMeans(seqIN, preFilter, nbKMeansClasses, minSize, maxSize, minValue, seqOUT);
         
-        HashMap<Integer, List<ConnectedComponent>> componentsMap = new HashMap<Integer, List<ConnectedComponent>>();
-        
-        int minC = channel == -1 ? 0 : channel;
-        int maxC = channel == -1 ? channels - 1 : channel;
-        int sizeC = maxC - minC + 1;
-        
-        for (int t = 0; t < frames; t++)
+        // sort components by time
+        for (int t = 0; t < seqIN.getSizeT(); t++)
         {
-            // Create the output labeled sequence
+            ArrayList<ConnectedComponent> listT = new ArrayList<ConnectedComponent>();
             
-            for (int z = 0; z < depth; z++)
-                seqOUT.setImage(t, z, new IcyBufferedImage(width, height, sizeC, DataType.UINT));
+            for (ConnectedComponent cc : components)
+                if (cc.getT() == t) listT.add(cc);
             
-            componentsMap.put(t, new ArrayList<ConnectedComponent>());
-            
-            for (int c = minC; c <= maxC; c++)
-            {
-                for (int z = 0; z < depth; z++)
-                    Arrays.fill(seqC.getDataXYAsInt(0, z, 0), 0);
-                
-                // 1) Copy current image in a new sequence
-                
-                ArrayUtil.arrayToArray(seqIN.getDataXYZ(t, c), seqLABELS.getDataXYZ(0, 0), seqIN.getDataType_().isSigned());
-                
-                // 2) Pre-filter the input data
-                
-                double scaleXZ = seqIN.getPixelSizeX() / seqIN.getPixelSizeZ();
-                
-                Kernels1D gaussianXY = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(preFilter);
-                Kernels1D gaussianZ = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(preFilter * scaleXZ);
-                
-                Convolution1D.convolve(seqLABELS, gaussianXY.getData(), gaussianXY.getData(), depth > 1 ? gaussianZ.getData() : null);
-                
-                // 3) K-means on the raw data
-                
-                Thresholder.threshold(seqLABELS, 0, KMeans.computeKMeansThresholds(seqLABELS, 0, nbKMeansClasses, 255), true);
-                
-                // 4) Loop on each class in ascending order
-                
-                for (short currentClass = 1; currentClass < nbKMeansClasses; currentClass++)
-                {
-                    // retrieve classes c and above as a binary image
-                    for (int z = 0; z < depth; z++)
-                    {
-                        int[] _labels = seqLABELS.getDataXYAsInt(0, z, 0);
-                        int[] _class = seqC.getDataXYAsInt(0, z, 0);
-                        int[] _out = seqOUT.getDataXYAsInt(t, z, sizeC == 1 ? 0 : c);
-                        
-                        for (int i = 0; i < _labels.length; i++)
-                            if ((_labels[i] & 0xffff) >= currentClass && _out[i] == 0)
-                            {
-                                _class[i] = 1;
-                            }
-                    }
-                    
-                    // extract connected components on this current class
-                    {
-                        Sequence seqLabels = new Sequence();
-                        List<ConnectedComponent> components = ConnectedComponents.extractConnectedComponents(seqC, minSize, maxSize, seqLabels).get(0);
-                        seqC = seqLabels;
-                        
-                        // assign t/c value to all components
-                        for (ConnectedComponent cc : components)
-                        {
-                            cc.setT(t);
-                            cc.setC(c);
-                        }
-                        
-                        if (minValue == null)
-                        {
-                            componentsMap.get(t).addAll(components);
-                        }
-                        else
-                        {
-                            int[][] _class_z_xy = seqC.getDataXYZAsInt(0, 0);
-                            
-                            for (ConnectedComponent cc : components)
-                            {
-                                if (cc.computeMaxIntensity(seqIN)[c] < minValue)
-                                {
-                                    for (Point3i pt : cc)
-                                        _class_z_xy[pt.z][pt.y * width + pt.x] = 0;
-                                }
-                                else
-                                {
-                                    componentsMap.get(t).add(cc);
-                                }
-                            }
-                        }
-                    }
-                    
-                    // store the final objects in the output image
-                    for (int z = 0; z < depth; z++)
-                    {
-                        int[] _class = seqC.getDataXYAsInt(0, z, 0);
-                        int[] _out = seqOUT.getDataXYAsInt(t, z, sizeC == 1 ? 0 : c);
-                        
-                        for (int i = 0; i < _out.length; i++)
-                        {
-                            if (_class[i] != 0)
-                            {
-                                // store the valid pixel in the output
-                                _out[i] = 1;
-                                // erase the pixel from seqC for future classes
-                                _class[i] = 0;
-                            }
-                        }
-                    }
-                } // currentClass
-            }
-            System.gc();
+            listT.trimToSize();
+            map.put(t, listT);
         }
         
-        seqOUT.endUpdate();
-        seqOUT.dataChanged();
-        return componentsMap;
+        return map;
     }
     
     public void clean()
