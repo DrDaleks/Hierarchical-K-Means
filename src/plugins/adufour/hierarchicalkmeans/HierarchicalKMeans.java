@@ -109,7 +109,11 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
         
         try
         {
-            Sequence s = SequenceUtil.extractChannel(input.getValue(true), channel.getValue());
+            Sequence s = input.getValue(true);
+            if (channel.getValue() != -1 && s.getSizeC() > 1)
+            {
+                s = SequenceUtil.extractChannel(s, channel.getValue());
+            }
             
             ccs = HKMeans.hKMeans(s, preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), finalThreshold.getValue(), labeledSequence);
         }
@@ -152,10 +156,11 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
         {
             // Convert the list of ROI to a detection set
             DetectionResult result = new DetectionResult();
+            result.setSequence(input.getValue(true));
             for (ConnectedComponent cc : ccs)
             {
                 Spot trackableSpot = new Spot(cc.getX(), cc.getY(), cc.getZ());
-                for(Point3i pt : cc)
+                for (Point3i pt : cc)
                 {
                     trackableSpot.point3DList.add(new Point3D(pt.x, pt.y, pt.z));
                 }
