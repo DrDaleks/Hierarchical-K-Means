@@ -100,7 +100,13 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
     @Override
     public void execute()
     {
-        Sequence labeledSequence = exportSequence.getValue() ? new Sequence() : null;
+        Sequence labeledSequence = null;
+        
+        if (exportSequence.getValue() || outputSequence.isReferenced()) 
+        {
+            labeledSequence = new Sequence(input.getValue(true).getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
+            outputSequence.setValue(labeledSequence);
+        }
         
         int nbKMeansClasses = smartLabelClasses.getValue();
         if (nbKMeansClasses < 2) throw new VarException(smartLabelClasses.getVariable(), "HK-Means requires at least two classes to run");
@@ -124,12 +130,9 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
         
         if (getUI() != null) nbObjects.setText(ccs.size() + " objects detected");
         
-        if (exportSequence.getValue()) labeledSequence.setName(input.getValue(true).getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
-        outputSequence.setValue(labeledSequence);
-        
         outputCCs.setValue(ccs.toArray(new ConnectedComponent[ccs.size()]));
         
-        if (exportSequence.getValue())
+        if (labeledSequence != null)
         {
             if (sorting.getValue().comparator != null) reLabel(labeledSequence, ccs, sorting.getValue().comparator);
             
@@ -149,7 +152,7 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
                 labeledSequence.getColorModel().setColorMap(0, new FireColorMap(), true);
             }
             
-            addSequence(labeledSequence);
+            if (!isHeadLess()) addSequence(labeledSequence);
         }
         
         if (exportSwPool.getValue())
