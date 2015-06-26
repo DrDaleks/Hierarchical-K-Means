@@ -4,7 +4,6 @@ import icy.image.colormap.FireColorMap;
 import icy.image.colormodel.IcyColorModel;
 import icy.main.Icy;
 import icy.roi.ROI;
-import icy.roi.ROI2D;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
 import icy.sequence.SequenceUtil;
@@ -31,6 +30,7 @@ import plugins.adufour.ezplug.EzLabel;
 import plugins.adufour.ezplug.EzPlug;
 import plugins.adufour.ezplug.EzStoppable;
 import plugins.adufour.ezplug.EzVarBoolean;
+import plugins.adufour.ezplug.EzVarChannel;
 import plugins.adufour.ezplug.EzVarDimensionPicker;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarEnum;
@@ -53,7 +53,9 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
     
     protected EzVarSequence                         input             = new EzVarSequence("Input");
     
-    protected EzVarDimensionPicker                  channel           = new EzVarDimensionPicker("Channel", DimensionId.C, input.getVariable(), true);
+    protected EzVarChannel                          channel           = new EzVarChannel("channel", input.getVariable(), true);
+    
+    protected EzVarDimensionPicker                  frame             = new EzVarDimensionPicker("Frame", DimensionId.T, input.getVariable(), true);
     
     protected EzVarDouble                           preFilterValue    = new EzVarDouble("Gaussian pre-filter", 0, 50, 0.1);
     
@@ -82,10 +84,11 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
     @Override
     public void initialize()
     {
-        super.addEzComponent(input);
-        super.addEzComponent(channel);
+        addEzComponent(input);
+        addEzComponent(frame);
+        addEzComponent(channel);
         channel.setToolTipText("Channel to process (-1 for \"all\")");
-        super.addEzComponent(preFilterValue);
+        addEzComponent(preFilterValue);
         addEzComponent(new EzGroup("Object size", minSize, maxSize));
         addEzComponent(finalThreshold);
         addEzComponent(smartLabelClasses);
@@ -102,7 +105,7 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
     {
         Sequence labeledSequence = null;
         
-        if (exportSequence.getValue() || outputSequence.isReferenced()) 
+        if (exportSequence.getValue() || outputSequence.isReferenced())
         {
             labeledSequence = new Sequence(input.getValue(true).getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
             outputSequence.setValue(labeledSequence);
@@ -116,12 +119,22 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
         try
         {
             Sequence s = input.getValue(true);
-            if (channel.getValue() != -1 && s.getSizeC() > 1)
-            {
-                s = SequenceUtil.extractChannel(s, channel.getValue());
-            }
             
+            // restrict to a specific channel?
+            if (channel.getValue() != -1 && s.getSizeC() > 1) s = SequenceUtil.extractChannel(s, channel.getValue());
+            
+            // restrict to a specific frame?
+            if (frame.getValue() != -1 && s.getSizeT() > 1) s = SequenceUtil.extractFrame(s, frame.getValue());
+            
+            // do it!
             ccs = HKMeans.hKMeans(s, preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), finalThreshold.getValue(), labeledSequence);
+            
+            // if a specific frame was extracted, the T is now incorrect, so fix it
+            if (frame.getValue() != -1 && s.getSizeT() > 1)
+            {
+                for (ConnectedComponent cc : ccs)
+                    cc.setT(frame.getValue());
+            }
         }
         catch (ConvolutionException e)
         {
@@ -212,8 +225,8 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
                 
                 in.beginUpdate();
                 
-                for (ROI2D roi : input.getValue().getROI2Ds())
-                    if (roi instanceof ROI2DArea) in.removeROI(roi);
+                for (ROI roi : input.getValue().getROIs())
+                    if (roi.getName().startsWith("HK-Means")) in.removeROI(roi);
                 
                 for (ROI roi : outputROIs.getValue())
                     in.addROI(roi);
