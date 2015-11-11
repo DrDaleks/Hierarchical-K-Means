@@ -1,265 +1,232 @@
 package plugins.adufour.hierarchicalkmeans;
 
-import icy.image.colormap.FireColorMap;
-import icy.image.colormodel.IcyColorModel;
-import icy.main.Icy;
-import icy.roi.ROI;
-import icy.sequence.DimensionId;
-import icy.sequence.Sequence;
-import icy.sequence.SequenceUtil;
-import icy.swimmingPool.SwimmingObject;
-
+import java.awt.Point;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.vecmath.Point3i;
+import javax.swing.JSeparator;
 
+import icy.image.IcyBufferedImage;
+import icy.image.colormap.FireColorMap;
+import icy.main.Icy;
+import icy.roi.ROI;
+import icy.roi.ROI2D;
+import icy.roi.ROI3D;
+import icy.sequence.Sequence;
+import icy.sequence.SequenceDataIterator;
+import icy.sequence.SequenceUtil;
+import icy.swimmingPool.SwimmingObject;
+import icy.type.DataIteratorUtil;
+import icy.type.DataType;
+import icy.type.point.Point5D;
+import icy.util.OMEUtil;
+import loci.formats.ome.OMEXMLMetadataImpl;
 import plugins.adufour.blocks.lang.Block;
 import plugins.adufour.blocks.util.VarList;
 import plugins.adufour.connectedcomponents.ConnectedComponent;
-import plugins.adufour.connectedcomponents.ConnectedComponents;
-import plugins.adufour.connectedcomponents.ConnectedComponents.Sorting;
-import plugins.adufour.ezplug.EzException;
-import plugins.adufour.ezplug.EzGroup;
 import plugins.adufour.ezplug.EzLabel;
 import plugins.adufour.ezplug.EzPlug;
 import plugins.adufour.ezplug.EzStoppable;
+import plugins.adufour.ezplug.EzVar;
 import plugins.adufour.ezplug.EzVarBoolean;
 import plugins.adufour.ezplug.EzVarChannel;
-import plugins.adufour.ezplug.EzVarDimensionPicker;
 import plugins.adufour.ezplug.EzVarDouble;
-import plugins.adufour.ezplug.EzVarEnum;
+import plugins.adufour.ezplug.EzVarFrame;
 import plugins.adufour.ezplug.EzVarInteger;
+import plugins.adufour.ezplug.EzVarListener;
 import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.ConvolutionException;
-import plugins.adufour.vars.lang.VarGenericArray;
 import plugins.adufour.vars.lang.VarROIArray;
 import plugins.adufour.vars.lang.VarSequence;
 import plugins.adufour.vars.util.VarException;
-import plugins.kernel.roi.roi2d.ROI2DArea;
-import plugins.kernel.roi.roi3d.ROI3DArea;
+import plugins.kernel.roi.descriptor.measure.ROIMassCenterDescriptorsPlugin;
 import plugins.nchenouard.spot.DetectionResult;
 import plugins.nchenouard.spot.Point3D;
 import plugins.nchenouard.spot.Spot;
 
 public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
 {
-    protected static int                            resultID          = 1;
+    protected static int resultID = 1;
     
-    protected EzVarSequence                         input             = new EzVarSequence("Input");
+    protected EzVarSequence input = new EzVarSequence("Input");
     
-    protected EzVarChannel                          channel           = new EzVarChannel("channel", input.getVariable(), true);
+    protected EzVarChannel channel = new EzVarChannel("Channel", input.getVariable(), true);
     
-    protected EzVarDimensionPicker                  frame             = new EzVarDimensionPicker("Frame", DimensionId.T, input.getVariable(), true);
+    protected EzVarFrame frame = new EzVarFrame("Frame", input.getVariable(), true);
     
-    protected EzVarDouble                           preFilterValue    = new EzVarDouble("Gaussian pre-filter", 0, 50, 0.1);
+    protected EzVarDouble preFilterSigma = new EzVarDouble("Gaussian pre-filter", 0, 50, 0.1);
     
-    protected EzVarInteger                          minSize           = new EzVarInteger("Min size (px)", 100, 1, 200000000, 1);
+    protected EzVarInteger minSize = new EzVarInteger("Min object size (px)", 100, 1, 200000000, 1);
     
-    protected EzVarInteger                          maxSize           = new EzVarInteger("Max size (px)", 1600, 1, 200000000, 1);
+    protected EzVarInteger maxSize = new EzVarInteger("Max object size (px)", 1600, 1, 200000000, 1);
     
-    protected EzVarInteger                          smartLabelClasses = new EzVarInteger("Number of classes", 10, 2, 255, 1);
+    protected EzVarInteger nbClasses = new EzVarInteger("Intensity classes", 10, 2, 255, 1);
     
-    protected EzVarDouble                           finalThreshold    = new EzVarDouble("Final threshold", 0, 0, Short.MAX_VALUE, 1);
+    protected EzVarDouble finalThreshold = new EzVarDouble("Min object intensity", 0, 0, 65535, 1);
     
-    protected EzVarBoolean                          exportSequence    = new EzVarBoolean("Labeled sequence", false);
-    protected EzVarBoolean                          exportSwPool      = new EzVarBoolean("Swimming pool data", false);
-    protected EzVarBoolean                          exportROI         = new EzVarBoolean("ROIs", true);
+    protected EzVarBoolean exportROI      = new EzVarBoolean("Export ROIs", true);
+    protected EzVarBoolean exportSequence = new EzVarBoolean("Export labels", false);
+    protected EzVarBoolean exportSwPool   = new EzVarBoolean("Prepare for tracking", false);
     
-    protected EzVarEnum<Sorting>                    sorting           = new EzVarEnum<ConnectedComponents.Sorting>("Sorting", Sorting.values(), Sorting.DEPTH_ASC);
+    protected EzLabel nbObjects = new EzLabel(" ");
     
-    protected EzLabel                               nbObjects;
+    protected VarSequence outputSequence = new VarSequence("binary sequence", null);
     
-    protected VarSequence                           outputSequence    = new VarSequence("binary sequence", null);
-    
-    protected VarGenericArray<ConnectedComponent[]> outputCCs         = new VarGenericArray<ConnectedComponent[]>("objects", ConnectedComponent[].class, null);
-    
-    protected VarROIArray                           outputROIs        = new VarROIArray("list of ROI");
+    protected VarROIArray outputROIs = new VarROIArray("list of ROI");
     
     @Override
     public void initialize()
     {
         addEzComponent(input);
+        
+        input.addVarChangeListener(new EzVarListener<Sequence>()
+        {
+            @Override
+            public void variableChanged(EzVar<Sequence> source, Sequence newValue)
+            {
+                exportSwPool.setVisible(newValue != null && newValue.getSizeT() > 1);
+            }
+        });
+        
         addEzComponent(frame);
         addEzComponent(channel);
-        channel.setToolTipText("Channel to process (-1 for \"all\")");
-        addEzComponent(preFilterValue);
-        addEzComponent(new EzGroup("Object size", minSize, maxSize));
+        addEzComponent(preFilterSigma);
+        
+        addComponent(new JSeparator(JSeparator.HORIZONTAL));
+        
+        // Number of classes
+        String nbClassesHelp = "<html>A classical threshold splits the histogram into 2 classes (background and foreground)<br/>";
+        nbClassesHelp += "Increase this value if the objects of interest have different mean intensities</html>";
+        nbClasses.setToolTipText(nbClassesHelp);
+        addEzComponent(nbClasses);
+        
+        // Size constraint
+        String minSizeHelp = "<html>Objects with an area (2D) or volume (3D) below this value are discarded</html>";
+        String maxSizeHelp = "<html>Objects with an area (2D) or volume (3D) above this value are discarded</html>";
+        minSize.setToolTipText(minSizeHelp);
+        maxSize.setToolTipText(maxSizeHelp);
+        addEzComponent(minSize);
+        addEzComponent(maxSize);
+        
+        // Final threshold
+        String finalThresholdHelp = "<html>Objects are considerered valid if they have at least one pixel above this value<br/>";
+        finalThresholdHelp += "=> useful to remove spurious artefacts from the background</html>";
+        finalThreshold.setToolTipText(finalThresholdHelp);
         addEzComponent(finalThreshold);
-        addEzComponent(smartLabelClasses);
         
-        addEzComponent(new EzGroup("Show result as...", exportSequence, sorting, exportSwPool, exportROI));
-        exportROI.setToolTipText("Create ROIs on the original sequence");
-        exportSequence.addVisibilityTriggerTo(sorting, true);
+        addComponent(new JSeparator(JSeparator.HORIZONTAL));
         
-        addEzComponent(nbObjects = new EzLabel("< click run to start the detection >"));
+        addEzComponent(exportROI);
+        addEzComponent(exportSequence);
+        addEzComponent(exportSwPool);
+        exportSwPool.setToolTipText("Exports the detected object in a format compatible with the \"Spot Tracking\" plug-in");
+        
+        addComponent(new JSeparator(JSeparator.HORIZONTAL));
+        
+        addEzComponent(nbObjects);
     }
     
     @Override
     public void execute()
     {
-        Sequence labeledSequence = null;
+        Sequence _inSeq = input.getValue(true);
+        Sequence _outSeq = null;
         
         if (exportSequence.getValue() || outputSequence.isReferenced())
         {
-            labeledSequence = new Sequence(input.getValue(true).getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++)));
-            outputSequence.setValue(labeledSequence);
+            // initialize the output sequence
+            
+            OMEXMLMetadataImpl metadata = OMEUtil.createOMEMetadata(_inSeq.getMetadata());
+            String name = _inSeq.getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++));
+            _outSeq = new Sequence(metadata, name);
+            
+            for (int t = 0; t < _inSeq.getSizeT(); t++)
+                for (int z = 0; z < _inSeq.getSizeZ(); z++)
+                    _outSeq.setImage(t, z, new IcyBufferedImage(_inSeq.getWidth(), _inSeq.getHeight(), _inSeq.getSizeC(), DataType.USHORT));
+                    
+            outputSequence.setValue(_outSeq);
         }
         
-        int nbKMeansClasses = smartLabelClasses.getValue();
-        if (nbKMeansClasses < 2) throw new VarException(smartLabelClasses.getVariable(), "HK-Means requires at least two classes to run");
+        byte nbKMeansClasses = nbClasses.getValue().byteValue();
+        if (nbKMeansClasses < 2) throw new VarException(nbClasses.getVariable(), "HK-Means requires at least two classes to run");
         
-        List<ConnectedComponent> ccs = null;
+        List<ROI> detections = HKMeans.hKMeans(_inSeq, preFilterSigma.getValue(), nbKMeansClasses, minSize.getValue(), maxSize.getValue(), finalThreshold.getValue(), getStatus());
         
-        try
+        // Rename and store the detections
+        int detectionID = 1;
+        for (ROI detection : detections)
+            detection.setName("HK-Means detection #" + detectionID++);
+        outputROIs.setValue(detections.toArray(new ROI[detections.size()]));
+        
+        if (exportROI.getValue())
         {
-            Sequence s = input.getValue(true);
-            
-            // restrict to a specific channel?
-            if (channel.getValue() != -1 && s.getSizeC() > 1) s = SequenceUtil.extractChannel(s, channel.getValue());
-            
-            // restrict to a specific frame?
-            if (frame.getValue() != -1 && s.getSizeT() > 1) s = SequenceUtil.extractFrame(s, frame.getValue());
-            
-            // do it!
-            ccs = HKMeans.hKMeans(s, preFilterValue.getValue(), smartLabelClasses.getValue(), minSize.getValue(), maxSize.getValue(), finalThreshold.getValue(), labeledSequence);
-            
-            // if a specific frame was extracted, the T is now incorrect, so fix it
-            if (frame.getValue() != -1 && s.getSizeT() > 1)
-            {
-                for (ConnectedComponent cc : ccs)
-                    cc.setT(frame.getValue());
-            }
-        }
-        catch (ConvolutionException e)
-        {
-            throw new EzException(this, e.getMessage(), true);
+            for (ROI roi : input.getValue().getROIs())
+                if (roi.getName().startsWith("HK-Means")) _inSeq.removeROI(roi, false);
+                
+            for (ROI roi : outputROIs.getValue())
+                _inSeq.addROI(roi, false);
         }
         
-        if (getUI() != null) nbObjects.setText(ccs.size() + " objects detected");
+        if (getUI() != null) nbObjects.setText(detections.size() + " objects detected");
         
-        outputCCs.setValue(ccs.toArray(new ConnectedComponent[ccs.size()]));
-        
-        if (labeledSequence != null)
+        if (_outSeq != null)
         {
-            if (sorting.getValue().comparator != null) reLabel(labeledSequence, ccs, sorting.getValue().comparator);
+            // Generate the labels from the extracted ROI
             
-            labeledSequence.updateChannelsBounds(true);
-            IcyColorModel cmIN = input.getValue().getColorModel();
-            IcyColorModel cmOUT = labeledSequence.getColorModel();
+            int roiID = 1;
+            for (ROI roi : detections)
+                DataIteratorUtil.set(new SequenceDataIterator(_outSeq, roi), roiID++);
+                
+            _outSeq.updateChannelsBounds(true);
             
             if (channel.getValue() == -1)
             {
                 // Use same color maps as the original sequence
                 for (int c = 0; c < input.getValue().getSizeC(); c++)
-                    cmOUT.setColorMap(c, cmIN.getColorMap(c), true);
+                    _outSeq.setColormap(c, _inSeq.getColorMap(c), true);
             }
             else
             {
                 // Use a "fire" color map
-                labeledSequence.getColorModel().setColorMap(0, new FireColorMap(), true);
+                _outSeq.getColorModel().setColorMap(0, new FireColorMap(), true);
             }
             
-            if (!isHeadLess()) addSequence(labeledSequence);
+            if (!isHeadLess()) addSequence(_outSeq);
         }
         
         if (exportSwPool.getValue())
         {
             // Convert the list of ROI to a detection set
             DetectionResult result = new DetectionResult();
-            result.setSequence(input.getValue(true));
-            for (ConnectedComponent cc : ccs)
+            result.setSequence(_inSeq);
+            for (ROI roi : detections)
             {
-                Spot trackableSpot = new Spot(cc.getX(), cc.getY(), cc.getZ());
-                for (Point3i pt : cc)
+                Point5D center = ROIMassCenterDescriptorsPlugin.computeMassCenter(roi);
+                Spot trackableSpot = new Spot(center.getX(), center.getY(), center.getZ());
+                
+                if (roi instanceof ROI2D)
                 {
-                    trackableSpot.point3DList.add(new Point3D(pt.x, pt.y, pt.z));
+                    ROI2D r2 = (ROI2D) roi;
+                    
+                    for (Point pt : r2.getBooleanMask(true).getPoints())
+                        trackableSpot.point3DList.add(new Point3D(pt.x, pt.y, r2.getZ()));
+                        
+                    result.addDetection(r2.getT(), trackableSpot);
                 }
-                result.addDetection(cc.getT(), trackableSpot);
+                else if (roi instanceof ROI3D)
+                {
+                    ROI3D r3 = (ROI3D) roi;
+                    
+                    for (icy.type.point.Point3D.Integer pt : r3.getBooleanMask(true).getPoints())
+                        trackableSpot.point3DList.add(new Point3D(pt.x, pt.y, pt.z));
+                        
+                    result.addDetection(r3.getT(), trackableSpot);
+                }
             }
             SwimmingObject object = new SwimmingObject(result, "HK-Means: " + result.getNumberOfDetection() + " objects");
             Icy.getMainInterface().getSwimmingPool().add(object);
-        }
-        
-        if (exportROI.getValue() || outputROIs.isReferenced())
-        {
-            ROI[] rois = new ROI[ccs.size()];
-            
-            boolean is3D = input.getValue(true).getSizeZ() > 1;
-            
-            int cpt = 0;
-            for (ConnectedComponent cc : ccs)
-            {
-                ROI roi;
-                if (is3D)
-                {
-                    ROI3DArea area = new ROI3DArea();
-                    for (Point3i pt : cc)
-                        area.addPoint(pt.x, pt.y, pt.z);
-                    
-                    area.setT(cc.getT());
-                    roi = area;
-                }
-                else
-                {
-                    ROI2DArea area = new ROI2DArea();
-                    for (Point3i pt : cc)
-                        area.addPoint(pt.x, pt.y);
-                    area.setT(cc.getT());
-                    roi = area;
-                }
-                
-                rois[cpt++] = roi;
-                roi.setName("HK-Means detection #" + cpt);
-            }
-            outputROIs.setValue(rois);
-            
-            if (exportROI.getValue())
-            {
-                Sequence in = input.getValue();
-                
-                in.beginUpdate();
-                
-                for (ROI roi : input.getValue().getROIs())
-                    if (roi.getName().startsWith("HK-Means")) in.removeROI(roi);
-                
-                for (ROI roi : outputROIs.getValue())
-                    in.addROI(roi);
-                
-                in.endUpdate();
-            }
-        }
-    }
-    
-    private void reLabel(Sequence labeledSequence, List<ConnectedComponent> ccs, Comparator<ConnectedComponent> comparator)
-    {
-        if (comparator == null) return;
-        
-        int width = labeledSequence.getSizeX();
-        
-        // one incremental IDs for each channel
-        int[] ids = new int[labeledSequence.getSizeC()];
-        Arrays.fill(ids, 1);
-        
-        Collections.sort(ccs, comparator);
-        
-        for (ConnectedComponent cc : ccs)
-        {
-            int[][] z_xy = labeledSequence.getDataXYZAsInt(cc.getT(), cc.getC());
-            int value = ids[cc.getC()];
-            
-            for (Point3i pt : cc)
-            {
-                z_xy[pt.z][pt.y * width + pt.x] = value;
-            }
-            
-            // increment the ID for that channel
-            ids[cc.getC()]++;
         }
     }
     
@@ -428,7 +395,7 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
             
             for (ConnectedComponent cc : components)
                 if (cc.getT() == t) listT.add(cc);
-            
+                
             listT.trimToSize();
             map.put(t, listT);
         }
@@ -444,10 +411,11 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
     public void declareInput(VarList inputMap)
     {
         inputMap.add("Input", input.getVariable());
-        inputMap.add("Gaussian pre-filter", preFilterValue.getVariable());
+        inputMap.add("Gaussian pre-filter", preFilterSigma.getVariable());
+        inputMap.add("Frame", frame.getVariable());
+        inputMap.add("Number of classes", nbClasses.getVariable());
         inputMap.add("Min size (px)", minSize.getVariable());
         inputMap.add("Max size (px)", maxSize.getVariable());
-        inputMap.add("Number of classes", smartLabelClasses.getVariable());
         inputMap.add("Final threshold", finalThreshold.getVariable());
         
         // force sequence export in box mode
@@ -460,7 +428,6 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
     public void declareOutput(VarList outputMap)
     {
         outputMap.add("binary sequence", outputSequence);
-        outputMap.add("output objects", outputCCs);
         outputMap.add("output regions", outputROIs);
     }
     
