@@ -134,6 +134,20 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
         Sequence _inSeq = input.getValue(true);
         Sequence _outSeq = null;
         
+        int minT = frame.getValue(), sizeT = 1;
+        if (minT == -1)
+        {
+            minT = 0;
+            sizeT = _inSeq.getSizeT();
+        }
+        
+        int minC = channel.getValue(), sizeC = minC;
+        if (minC == -1)
+        {
+            minC = 0;
+            sizeC = _inSeq.getSizeC();
+        }
+        
         if (exportSequence.getValue() || outputSequence.isReferenced())
         {
             // initialize the output sequence
@@ -142,18 +156,27 @@ public class HierarchicalKMeans extends EzPlug implements Block, EzStoppable
             String name = _inSeq.getName() + "_HK-Means" + (isHeadLess() ? "" : ("#" + resultID++));
             _outSeq = new Sequence(metadata, name);
             
-            for (int t = 0; t < _inSeq.getSizeT(); t++)
+            if (sizeT > 1)
+            {
+                for (int t = minT; t < minT + sizeT; t++)
+                    for (int z = 0; z < _inSeq.getSizeZ(); z++)
+                        _outSeq.setImage(t, z, new IcyBufferedImage(_inSeq.getWidth(), _inSeq.getHeight(), sizeC, DataType.USHORT));
+            }
+            else
+            {
                 for (int z = 0; z < _inSeq.getSizeZ(); z++)
-                    _outSeq.setImage(t, z, new IcyBufferedImage(_inSeq.getWidth(), _inSeq.getHeight(), _inSeq.getSizeC(), DataType.USHORT));
-                    
+                    _outSeq.setImage(0, z, new IcyBufferedImage(_inSeq.getWidth(), _inSeq.getHeight(), sizeC, DataType.USHORT));
+            }
+            
             outputSequence.setValue(_outSeq);
         }
         
         byte nbKMeansClasses = nbClasses.getValue().byteValue();
         if (nbKMeansClasses < 2) throw new VarException(nbClasses.getVariable(), "HK-Means requires at least two classes to run");
         
-        List<ROI> detections = HKMeans.hKMeans(_inSeq, preFilterSigma.getValue(), nbKMeansClasses, minSize.getValue(), maxSize.getValue(), finalThreshold.getValue(), getStatus());
-        
+        List<ROI> detections = HKMeans.hKMeans(_inSeq, frame.getValue(), channel.getValue(), preFilterSigma.getValue(), nbKMeansClasses, minSize.getValue(), maxSize.getValue(),
+                finalThreshold.getValue(), getStatus());
+                
         // Rename and store the detections
         int detectionID = 1;
         for (ROI detection : detections)

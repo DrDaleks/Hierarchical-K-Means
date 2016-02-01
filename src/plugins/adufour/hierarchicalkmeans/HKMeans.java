@@ -10,11 +10,11 @@ import icy.image.IcyBufferedImage;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.roi.ROI3D;
-import icy.roi.ROIUtil;
 import icy.sequence.Sequence;
 import icy.sequence.SequenceDataIterator;
 import icy.type.DataIteratorUtil;
 import icy.type.DataType;
+import icy.type.collection.array.Array1DUtil;
 import icy.type.collection.array.ArrayUtil;
 import plugins.adufour.connectedcomponents.ConnectedComponent;
 import plugins.adufour.connectedcomponents.ConnectedComponents;
@@ -26,6 +26,7 @@ import plugins.adufour.roi.LabelExtractor;
 import plugins.adufour.roi.LabelExtractor.ExtractionType;
 import plugins.adufour.thresholder.KMeans;
 import plugins.adufour.thresholder.Thresholder;
+import plugins.kernel.roi.descriptor.intensity.ROIMaxIntensityDescriptor;
 
 /**
  * Extracts objects based on multiple thresholds and size constraints
@@ -40,8 +41,6 @@ public class HKMeans
      * 
      * @param seqIN
      *            the sequence to segment
-     * @param channel
-     *            the channel to process (or -1 to process all channels)
      * @param preFilter
      *            the standard deviation of the Gaussian filter to apply before segmentation (0 for
      *            none)
@@ -240,7 +239,7 @@ public class HKMeans
      */
     public static List<ROI> hKMeans(Sequence seqIN, byte nbKMeansClasses, int minSize, int maxSize, Double minIntensity)
     {
-        return hKMeans(seqIN, 0.0, nbKMeansClasses, minSize, maxSize, minIntensity, (EzStatus) null);
+        return hKMeans(seqIN, -1, -1, 0.0, nbKMeansClasses, minSize, maxSize, minIntensity, (EzStatus) null);
     }
     
     /**
@@ -249,6 +248,13 @@ public class HKMeans
      * 
      * @param seqIN
      *            the sequence to segment
+     * @param t
+     *            the time point to process (or -1 to process all time points)
+     * @param c
+     *            the channel to process (or -1 to process all channels)
+     * @param preFilter
+     *            the standard deviation of the Gaussian filter to apply before segmentation (0 for
+     *            none)
      * @param nbKMeansClasses
      *            the number of classes to divide the histogram (up to 255)
      * @param minSize
@@ -259,19 +265,20 @@ public class HKMeans
      *            the minimum intensity value each object should have (in its corresponding channel)
      * @param status
      *            an {@link EzStatus} object to monitor the task progression (or <code>null</code>
-     *            if not needed)
+     *            if not available or not needed)
      * @return a list of ROI extracted from the input sequence
      */
-    public static List<ROI> hKMeans(Sequence seqIN, double preFilter, byte nbKMeansClasses, int minSize, int maxSize, Double minIntensity, EzStatus status)
+    public static List<ROI> hKMeans(Sequence seqIN, int t, int c, double preFilter, byte nbKMeansClasses, int minSize, int maxSize, Double minIntensity, EzStatus status)
     {
         List<ROI> rois = new ArrayList<ROI>();
         
-        int minT = 0, maxT = seqIN.getSizeT() - 1;
-        int minC = 0, maxC = seqIN.getSizeC() - 1;
+        int minT = t >= 0 ? t : 0, maxT = t >= 0 ? t : seqIN.getSizeT() - 1;
+        int minC = c >= 0 ? c : 0, maxC = c >= 0 ? c : seqIN.getSizeC() - 1;
         
         final int width = seqIN.getSizeX();
         final int height = seqIN.getSizeY();
         final int depth = seqIN.getSizeZ();
+        final DataType dataType = seqIN.getDataType_();
         
         // Expected memory overhead (in bytes): 3 x width x height x depth
         Sequence allClasses = new Sequence("Labels in " + seqIN.getName());
@@ -281,12 +288,12 @@ public class HKMeans
         for (int z = 0; z < depth; z++)
         {
             currentClass.setImage(0, z, new IcyBufferedImage(width, height, 1, DataType.UBYTE));
-            allClasses.setImage(0, z, new IcyBufferedImage(width, height, 1, DataType.UBYTE));
+            allClasses.setImage(0, z, new IcyBufferedImage(width, height, 1, dataType));
             finalBinaryOutput.setImage(0, z, new IcyBufferedImage(width, height, 1, DataType.UBYTE));
         }
         // NB: The final (binary) output could be given to the user in addition to the extracted ROI
         
-        for (int t = minT; t <= maxT; t++)
+        for (t = minT; t <= maxT; t++)
         {
             if (status != null && maxT - minT > 0)
             {
@@ -294,7 +301,7 @@ public class HKMeans
                 status.setCompletion((t + 1) / (double) (maxT - minT + 1));
             }
             
-            for (int c = minC; c <= maxC; c++)
+            for (c = minC; c <= maxC; c++)
             {
                 if (status != null && maxC - minC > 0)
                 {
@@ -310,7 +317,7 @@ public class HKMeans
                 
                 // 1) Copy current frame in a new sequence
                 
-                ArrayUtil.arrayToArray(seqIN.getDataXYZ(t, c), allClasses.getDataXYZ(0, 0), seqIN.getDataType_().isSigned());
+                ArrayUtil.arrayToArray(seqIN.getDataXYZ(t, c), allClasses.getDataXYZ(0, 0), dataType.isSigned());
                 
                 // 2) Gaussian filtering
                 
@@ -342,14 +349,14 @@ public class HKMeans
                     
                     for (int z = 0; z < depth; z++)
                     {
-                        byte[] _allClasses = allClasses.getDataXYAsByte(0, z, 0);
+                        Object _allClasses = allClasses.getDataXY(0, z, 0);
                         byte[] _currentClass = currentClass.getDataXYAsByte(0, z, 0);
                         byte[] _outputMask = finalBinaryOutput.getDataXYAsByte(0, z, 0);
                         
                         int offset = 0;
                         for (int j = 0; j < height; j++)
                             for (int i = 0; i < width; i++, offset++)
-                                if (_allClasses[offset] >= currentClassID && _outputMask[offset] == 0)
+                                if (_outputMask[offset] == 0 && Array1DUtil.getValue(_allClasses, offset, dataType) >= currentClassID)
                                 {
                                     _currentClass[offset] = 1;
                                 }
@@ -361,7 +368,7 @@ public class HKMeans
                     
                     // 3.b) extract labels on this current class
                     
-                    List<ROI> currentROIs = LabelExtractor.extractLabels(currentClass, 0, 0, ExtractionType.ANY_LABEL_VS_BACKGROUND, 0);
+                    List<ROI> currentROIs = LabelExtractor.extractLabelsSlower(currentClass, 0, 0, ExtractionType.ANY_LABEL_VS_BACKGROUND, 0);
                     
                     // Discard ROIs violating the size or intensity constraints
                     for (int i = 0; i < currentROIs.size(); i++)
@@ -375,7 +382,9 @@ public class HKMeans
                             continue;
                         }
                         
-                        if (minIntensity != null && minIntensity > ROIUtil.getMaxIntensity(seqIN, currentROI, -1, t, c))
+                        double maxIntensity = ROIMaxIntensityDescriptor.computeMaxIntensity(currentROI, seqIN);
+                        
+                        if (minIntensity != null && maxIntensity < minIntensity)
                         {
                             currentROIs.remove(i--);
                             continue;
