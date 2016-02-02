@@ -344,6 +344,12 @@ public class HKMeans
                 {
                     if (Thread.currentThread().isInterrupted()) return rois;
                     
+                    if (status != null)
+                    {
+                        status.setCompletion(currentClassID / (double) nbKMeansClasses);
+                        status.setMessage("Extracting class " + currentClassID + "/" + (nbKMeansClasses - 1));
+                    }
+                    
                     // 3.a) retrieve classes c and above as a binary image
                     // (except where objects have already been found)
                     
@@ -368,7 +374,7 @@ public class HKMeans
                     
                     // 3.b) extract labels on this current class
                     
-                    List<ROI> currentROIs = LabelExtractor.extractLabelsSlower(currentClass, 0, 0, ExtractionType.ANY_LABEL_VS_BACKGROUND, 0);
+                    List<ROI> currentROIs = LabelExtractor.extractLabels(currentClass, 0, 0, ExtractionType.ANY_LABEL_VS_BACKGROUND, 0);
                     
                     // Discard ROIs violating the size or intensity constraints
                     for (int i = 0; i < currentROIs.size(); i++)
@@ -410,8 +416,8 @@ public class HKMeans
                         }
                         else if (currentROI instanceof ROI3D)
                         {
-                            ((ROI2D) currentROI).setC(c);
-                            ((ROI2D) currentROI).setT(t);
+                            ((ROI3D) currentROI).setC(c);
+                            ((ROI3D) currentROI).setT(t);
                         }
                         currentROI.setColor(seqIN.getColorMap(c).getDominantColor().brighter());
                     }
